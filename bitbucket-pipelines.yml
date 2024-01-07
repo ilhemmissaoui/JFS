@@ -1,0 +1,69 @@
+image: node:lts
+
+options:
+  docker: true
+  size: 2x
+
+clone:
+  depth: full
+
+definitions:
+  services:
+    docker:
+      memory: 4096
+  caches:
+    sonar: ~/.sonar
+  steps:
+    - step: &build-test-sonarcloud
+        name: SonarQube analysis
+        caches:
+          - node
+          - sonar
+        services:
+          - docker
+        script:
+          - npm install --legacy-peer-deps
+          - pipe: sonarsource/sonarqube-scan:1.1.0
+            variables:
+              SONAR_HOST_URL: ${SONAR_HOST_URL}
+              SONAR_TOKEN: ${SONAR_TOKEN}
+              SONAR_SCANNER_OPTS: -Xmx512m
+    - step: &check-quality-gate-sonarcloud
+        name: SonarQube Quality
+        services:
+          - docker
+        script:
+          - pipe: sonarsource/sonarqube-quality-gate:1.1.0
+            variables:
+              SONAR_TOKEN: ${SONAR_TOKEN}
+    - step: &build-test-npm
+        name: Compiling
+        caches:
+          - node
+        script:
+          - npm install --legacy-peer-deps
+          - npm run lint || true
+          - npm run build || true
+    - step: &deploy-forge
+        name: Deploying (Forge)
+        trigger: manual
+        script:
+          - echo "Deploying..."
+          - wget https://forge.laravel.com/servers/691921/sites/2068795/deploy/http?token=UkBMazI2HZZUB7G1Rs4QSERUuxcAhIqFA1UztCXc
+pipelines:
+  custom:
+    deploy-to-forge:
+      - step:
+          script:
+            - echo "Manual trigger for deployment, please double check!"
+      - step: *deploy-forge
+  branches:
+    develop:
+      - step: *build-test-npm
+      - step: *build-test-sonarcloud
+      - step: *check-quality-gate-sonarcloud
+      - step: *deploy-forge
+  pull-requests:
+    '**':
+      - step: *build-test-sonarcloud
+      - step: *check-quality-gate-sonarcloud
